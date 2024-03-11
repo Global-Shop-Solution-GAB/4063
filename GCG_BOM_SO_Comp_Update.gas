@@ -1,0 +1,194 @@
+Program.Sub.ScreenSU.Start
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.SetErrorHandler("Main_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+F.ODBC.Connection!con.OpenConnection(V.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass)
+Function.Intrinsic.Control.CallSub(Update)
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Main_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4063_BOM_SO_Order_Qty.gas",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	Function.Intrinsic.Control.CallSub(Unload)
+Function.Intrinsic.Control.EndIf
+
+
+Program.Sub.Main.End
+
+Program.Sub.Unload.Start
+F.Intrinsic.Control.SetErrorHandler("Unload_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+F.ODBC.Connection!con.Close
+Function.Intrinsic.Control.End
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Unload_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4063_BOM_SO_Order_Qty.gas",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	Function.Intrinsic.Control.End
+Function.Intrinsic.Control.EndIf
+
+Program.Sub.Unload.End
+
+Program.Sub.Update.Start
+F.Intrinsic.Control.SetErrorHandler("Update_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+V.Local.sSql.Declare(String)
+V.Local.sParent.Declare(String)
+V.Local.sRev.Declare(String)
+V.Local.sLoc.Declare(String)
+V.Local.sPartCombo.Declare(String)
+V.Local.sOrderNo.Declare(String)
+V.Local.sOrderLine.Declare(String)
+V.Local.fParentQtyOrdered.Declare(Float)
+V.Local.fCompQtyOrdered.Declare(Float)
+V.Local.sCols.Declare(String)
+V.Local.sWidths.Declare(String)
+V.Local.sRet.Declare(String)
+
+Function.Intrinsic.String.LPad(V.Passed.ORDER,"0",7,V.Local.sOrderNo)
+V.Local.sParent.Set(V.Passed.PART)
+V.Local.sRev.Set(V.Passed.PartRev)
+V.Local.sLoc.Set(V.Passed.Location)
+
+
+
+F.Global.Inventory.GetGSSPart(v.Local.sParent,v.Local.sRev,v.Local.sPartCombo)
+
+V.Local.sOrderLine.Set(V.Passed.ORDERLINE)
+V.Local.fParentQtyOrdered.Set(-1)
+V.Local.fCompQtyOrdered.Set(-1)
+
+'Building Browser for selecting match part if needed
+V.Local.sCols.Set("Part*!*Quantity")
+V.Local.sWidths.Set("7000*!*1000")
+
+F.Intrinsic.String.Split(V.Local.sCols,"*!*",V.Local.sCols)
+F.Intrinsic.String.Split(V.Local.sWidths,"*!*",V.Local.sWidths)
+
+F.Intrinsic.UI.SetBrowserHotTypeAhead(True)
+F.Intrinsic.UI.SetBrowserOOT(True)
+
+'The hooks fires after the sales order is updated from the BOM, so the program is going to be sure all component parts that are different in the BOM from the order lines is matched up to a order line
+'Getting parent record information from order lines
+F.Intrinsic.String.Build("Select PART, QTY_ORDERED from ORDER_LINES where RECORD_TYPE = 'L' and ORDER_NO = '{0}' and RECORD_NO = '{1}'",V.Local.sOrderNo,V.Local.sOrderLine,V.Local.sSql)
+F.ODBC.Connection!con.OpenLocalRecordsetRO("rst",V.Local.sSql)
+F.Intrinsic.Control.If(V.ODBC.con!rst.EOF,=,False)
+	V.Local.fParentQtyOrdered.Set(V.ODBC.con!rst.FieldValFloat!QTY_ORDERED)
+Function.Intrinsic.Control.EndIf
+F.ODBC.con!rst.Close
+
+'Making sure an order quantity for the parent was found, if not exiting the program
+Function.Intrinsic.Control.If(V.Local.fParentQtyOrdered,=,-1)
+	Function.Intrinsic.Control.CallSub(Unload)
+Function.Intrinsic.Control.EndIf
+
+
+'Opening order lines for all component parts to check to see if there is match for the part in the BOM master table
+F.Intrinsic.String.Build("Select ORDER_NO, RECORD_NO, PART, QTY_ORDERED, FLAG_BOM, BOM_PARENT from ORDER_LINES where RECORD_TYPE = 'L' and FLAG_BOM = 'C' and BOM_PARENT = '{0}' and ORDER_NO = '{1}'",V.Local.sOrderLine,V.Local.sOrderNo,V.Local.sSql)
+F.ODBC.Connection!con.OpenLocalRecordsetRW("rst",V.Local.sSql)
+F.Intrinsic.Control.DoUntil(V.ODBC.con!rst.EOF,=,True)
+	'First check to see if there is already a matching part in the BOM_SO_COMP table and if so, update the quantity ordered for component part
+	F.Intrinsic.String.Build("Select ORDER_NUMBER, ORDER_LINE, MATCH_PART from GCG_4063_COMP where ORDER_NUMBER = '{0}' and ORDER_LINE = '{1}'",V.ODBC.con!rst.FieldValTrim!ORDER_NO,V.ODBC.con!rst.FieldValTrim!RECORD_NO,V.Local.sSql)
+	F.ODBC.Connection!con.OpenLocalRecordsetRW("rstChk",V.Local.sSql)
+	Function.Intrinsic.Control.If(V.ODBC.con!rstChk.EOF,=,False)
+		'Found a match in cross ref table, getting quatity to make one from BOM master table and multiplying times parent order qty from order to get qty ordered for component part
+		F.Intrinsic.String.Build("Select QUANTITY from BOM_MSTR where PARENT = '{0}' and PART = '{1}'",V.Local.sPartCombo,V.ODBC.con!rstChk.FieldValTrim!MATCH_PART,V.Local.sSql)
+		F.ODBC.Connection!con.OpenLocalRecordsetRW("rstBOM",V.Local.sSql)
+		Function.Intrinsic.Control.If(V.ODBC.con!rstBOM.EOF,=,False)
+			'Match part still found in BOM, so updating order QTY
+			Function.Intrinsic.Math.Mult(V.Local.fParentQtyOrdered,V.ODBC.con!rstBOM.FieldValFloat!QUANTITY,V.Local.fCompQtyOrdered)
+			Function.Intrinsic.Math.Round(V.Local.fCompQtyOrdered,4,V.Local.fCompQtyOrdered)
+			F.ODBC.con!rst.Set!QTY_ORDERED(V.Local.fCompQtyOrdered)
+			F.ODBC.con!rst.Update
+			F.ODBC.con!rstBOM.Close
+		Function.Intrinsic.Control.Else
+			'Match part not found in BOM, checking to see if part now matches a part in BOM and if not asking for a new match part
+			F.ODBC.con!rstBOM.Close
+			F.Intrinsic.String.Build("Select QUANTITY from BOM_MSTR where PARENT = '{0}' and PART = '{1}'",V.Local.sPartCombo,V.ODBC.con!rst.FieldValTrim!PART,V.Local.sSql)
+			F.ODBC.Connection!con.OpenLocalRecordsetRW("rstBOM",V.Local.sSql)
+			'It only matters if there is no match, if there is a match to the BOM the CORE program would have already updated the order quantity
+			Function.Intrinsic.Control.If(V.ODBC.con!rstBOM.EOF,=,True)
+				F.Intrinsic.String.Build("Select PART, QUANTITY from BOM_MSTR where PARENT = '{0}' and SEQUENCE_BOM <> '0000' ORDER BY PART",V.Local.sPartCombo,V.Local.sSql)
+				F.Intrinsic.UI.Browser("Select Match Part From BOM","con",V.Local.sSql,V.Local.sCols,V.Local.sWidths,9000,8000,V.Local.sRet)
+				Function.Intrinsic.Control.If(V.Local.sRet,<>,"***CANCEL***")
+					Function.Intrinsic.String.Split(V.Local.sRet,"*!*",V.Local.sRet)
+					'Adding selected match part to cross ref table
+					F.ODBC.con!rstChk.AddNew
+					F.ODBC.con!rstChk.Set!ORDER_NUMBER(V.ODBC.con!rst.FieldValTrim!ORDER_NO)
+					F.ODBC.con!rstChk.Set!ORDER_LINE(V.ODBC.con!rst.FieldValTrim!RECORD_NO)
+					F.ODBC.con!rstChk.Set!MATCH_PART(V.Local.sRet(0).Trim)
+					F.ODBC.con!rstChk.Update
+
+					'Updating Component part order quantity
+					Function.Intrinsic.Math.Mult(V.Local.fParentQtyOrdered,V.Local.sRet(1).Float,V.Local.fCompQtyOrdered)
+					Function.Intrinsic.Math.Round(V.Local.fCompQtyOrdered,4,V.Local.fCompQtyOrdered)
+					F.ODBC.con!rst.Set!QTY_ORDERED(V.Local.fCompQtyOrdered)
+					F.ODBC.con!rst.Update
+				Function.Intrinsic.Control.EndIf
+			Function.Intrinsic.Control.EndIf
+			F.ODBC.con!rstBOM.Close
+		Function.Intrinsic.Control.EndIf
+	Function.Intrinsic.Control.Else
+		'No cross ref found, so checking to see if part matches a part in BOM
+		F.Intrinsic.String.Build("Select QUANTITY from BOM_MSTR where PARENT = '{0}' and PART = '{1}'",V.Local.sPartCombo,V.ODBC.con!rst.FieldValTrim!PART,V.Local.sSql)
+		F.ODBC.Connection!con.OpenLocalRecordsetRW("rstBOM",V.Local.sSql)
+		'It only matters if there is no match, if there is a match to the BOM the CORE program would have already updated the order quantity
+		Function.Intrinsic.Control.If(V.ODBC.con!rstBOM.EOF,=,True)
+			F.Intrinsic.String.Build("Select PART, QUANTITY from BOM_MSTR where PARENT = '{0}' and SEQUENCE_BOM <> '0000' ORDER BY PART",V.Local.sPartCombo,V.Local.sSql)
+			F.Intrinsic.UI.Browser("Select Match Part From BOM","con",V.Local.sSql,V.Local.sCols,V.Local.sWidths,9000,8000,V.Local.sRet)
+			Function.Intrinsic.Control.If(V.Local.sRet,<>,"***CANCEL***")
+				Function.Intrinsic.String.Split(V.Local.sRet,"*!*",V.Local.sRet)
+				'Adding selected match part to cross ref table
+				F.ODBC.con!rstChk.AddNew
+				F.ODBC.con!rstChk.Set!ORDER_NUMBER(V.ODBC.con!rst.FieldValTrim!ORDER_NO)
+				F.ODBC.con!rstChk.Set!ORDER_LINE(V.ODBC.con!rst.FieldValTrim!RECORD_NO)
+				F.ODBC.con!rstChk.Set!MATCH_PART(V.Local.sRet(0).Trim)
+				F.ODBC.con!rstChk.Update
+
+				'Updating Component part order quantity
+				Function.Intrinsic.Math.Mult(V.Local.fParentQtyOrdered,V.Local.sRet(1).Float,V.Local.fCompQtyOrdered)
+				Function.Intrinsic.Math.Round(V.Local.fCompQtyOrdered,4,V.Local.fCompQtyOrdered)
+				F.ODBC.con!rst.Set!QTY_ORDERED(V.Local.fCompQtyOrdered)
+				F.ODBC.con!rst.Update
+			Function.Intrinsic.Control.EndIf
+		Function.Intrinsic.Control.EndIf
+		F.ODBC.con!rstBOM.Close
+	Function.Intrinsic.Control.EndIf
+	F.ODBC.con!rstChk.Close
+	F.ODBC.con!rst.MoveNext
+Function.Intrinsic.Control.Loop
+F.ODBC.con!rst.Close
+
+Function.Intrinsic.Control.CallSub(Unload)
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Update_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4063_BOM_SO_Order_Qty.gas",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	Function.Intrinsic.Control.CallSub(Unload)
+Function.Intrinsic.Control.EndIf
+
+Program.Sub.Update.End
+
+
